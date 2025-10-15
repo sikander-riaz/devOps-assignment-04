@@ -1,0 +1,54 @@
+---
+- name: Get latest Docker Compose version from GitHub API
+  uri:
+    url: https://api.github.com/repos/docker/compose/releases/latest
+    return_content: yes
+  register: github_release
+
+- name: Set Docker Compose latest version
+  set_fact:
+    latest_compose_version: "{{ (github_release.json.tag_name).lstrip('v') }}"
+
+- name: Check if docker-compose (standalone) is installed
+  command: docker-compose --version
+  register: docker_compose_check
+  failed_when: false
+  changed_when: false
+
+- name: Check if docker compose (plugin) is installed
+  command: docker compose version
+  register: docker_compose_plugin_check
+  failed_when: false
+  changed_when: false
+
+- name: Set Docker Compose installation needed flag
+  set_fact:
+    needs_docker_compose: "{{ docker_compose_check.rc != 0 and docker_compose_plugin_check.rc != 0 }}"
+
+- name: Download Docker Compose binary (latest)
+  get_url:
+    url: "https://github.com/docker/compose/releases/download/v{{ latest_compose_version }}/docker-compose-linux-x86_64"
+    dest: /usr/local/bin/docker-compose
+    mode: "0755"
+    owner: root
+    group: root
+  become: true
+  when: needs_docker_compose
+
+- name: Create symbolic link for docker-compose in /usr/bin
+  file:
+    src: /usr/local/bin/docker-compose
+    dest: /usr/bin/docker-compose
+    state: link
+    force: yes
+  become: true
+  when: needs_docker_compose
+
+- name: Verify Docker Compose installation
+  command: "{{ 'docker compose version' if docker_compose_plugin_check.rc == 0 else 'docker-compose --version' }}"
+  register: compose_version
+  changed_when: false
+
+- name: Display Docker Compose version
+  debug:
+    msg: "Docker Compose version: {{ compose_version.stdout }}"
